@@ -1,9 +1,18 @@
 """
 Main module for the Cannabis Analytics Dashboard application.
+
+This is the home page showing overview metrics and key insights about
+California's cannabis retail market.
 """
 import streamlit as st
 from utils.data_loader import load_data
 from utils.generate_sidebar import generate_sidebar
+from utils.filters import (
+    apply_dispensary_filters,
+    apply_sentiment_filters,
+    get_filter_summary,
+    has_active_filters
+)
 
 # Page config
 st.set_page_config(
@@ -14,12 +23,16 @@ st.set_page_config(
 
 # Load data
 data = load_data()
-dispensaries = data['dispensaries']
+dispensaries_all = data['dispensaries']
 density = data['density']
-tweet_sentiment = data['tweet_sentiment']
+tweet_sentiment_all = data['tweet_sentiment']
 
 # Get sidebar filters
 sidebar_filters = generate_sidebar()
+
+# Apply filters to data
+dispensaries = apply_dispensary_filters(dispensaries_all, sidebar_filters)
+tweet_sentiment = apply_sentiment_filters(tweet_sentiment_all, sidebar_filters)
 
 # Title
 st.title("Cannabis Analytics Dashboard")
@@ -28,6 +41,10 @@ st.markdown("""
     insights into California's cannabis retail market, combining dispensary data with
     social media sentiment analysis.
 """)
+
+# Show active filters
+if has_active_filters(sidebar_filters):
+    st.info(f"📊 {get_filter_summary(sidebar_filters)}")
 
 # Overview metrics
 st.subheader("Market Overview")

@@ -1,41 +1,36 @@
 """
 Module for generating LLM responses and managing LLM-related functionality.
+
+NOTE: LLM functionality is currently not implemented in this application.
+The previous implementation had issues (using DistilBERT incorrectly for text generation).
+
+To implement LLM features in the future:
+1. Ensure OPENAI_API_KEY is set in .env file
+2. Use the openai package (already in dependencies)
+3. Implement proper error handling and rate limiting
+4. Consider adding features like:
+   - Chart interpretation
+   - Automated insights generation
+   - Natural language queries over the data
+
+Example implementation:
+    import os
+    import openai
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+
+    def generate_insight(data_summary, chart_type):
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{
+                "role": "user",
+                "content": f"Analyze this {chart_type} data: {data_summary}"
+            }]
+        )
+        return response.choices[0].message.content
 """
-import streamlit as st
-from transformers import pipeline
 
-
-def generate_llm():
-    """
-    Generate responses using a local language model.
-    """
-
-    def generate_response(input_text):
-        model_name = "distilbert-base-uncased"
-        classifier = pipeline("text-generation", model=model_name)
-
-        response = classifier(input_text, max_length=50)[0]["generated_text"]
-        st.info(response)
-
-    with st.form("my_form"):
-        text = st.text_area("Enter text:", "What does this plot mean?")
-        submitted = st.form_submit_button("Submit")
-        if submitted:
-            generate_response(text)
-
-
-def generate_llm_response(prompt):
-    """
-    Generate a response using LLM based on the given prompt.
-    
-    Args:
-        prompt (str): The input prompt for the LLM
-        
-    Returns:
-        str: Generated response from the LLM
-    """
-    with st.spinner('Generating response...'):
-        response = st.text_area('LLM Response', value='Sample response')
-        st.button('Regenerate')
-        st.button('Copy')
-    return response
+# Placeholder for future LLM implementation
+# Currently not used anywhere in the application
