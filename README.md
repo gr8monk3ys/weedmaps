@@ -33,10 +33,13 @@ This Streamlit-based dashboard provides comprehensive analytics and insights int
 
 ## Data Sources
 
-The dashboard utilizes three main data sources:
-- `Dispensaries.csv`: Contains detailed information about cannabis retailers
-- `Tweet_Sentiment.csv`: Social media sentiment data related to cannabis
-- `California_County_Boundaries.geojson`: Geographic boundaries for visualization
+The dashboard utilizes four main data sources in the `data/` directory:
+- **`Dispensaries.csv`**: Detailed cannabis retailer license information
+- **`Dispensary_Density.csv`**: Population-adjusted retailer density metrics
+- **`Tweet_Sentiment.csv`**: Social media sentiment data with BERT scores
+- **`California_County_Boundaries.geojson`**: County geographic boundaries
+
+See [DATA_SCHEMA.md](DATA_SCHEMA.md) for complete data file specifications.
 
 ## Technology Stack
 
@@ -81,34 +84,103 @@ streamlit run app/Home.py
 
 ```
 ├── app/
-│   ├── Home.py              # Main dashboard entry point
-│   ├── pages/               # Dashboard pages
-│   ├── plots/               # Visualization components
-│   ├── utils/               # Utility functions
-│   └── style.css           # Custom styling
-├── data/                    # Data files
-├── config/                  # Configuration files
-└── public/                  # Static assets
+│   ├── Home.py                    # Main dashboard entry point
+│   ├── pages/                     # Multi-page dashboard pages
+│   │   ├── 01-Market Overview.py
+│   │   ├── 02-Geographic Analysis.py
+│   │   └── 03-Social Insights.py
+│   ├── plots/                     # Reusable visualization functions
+│   │   ├── choropleth.py
+│   │   └── sentiment_distribution.py
+│   ├── utils/                     # Utility functions
+│   │   ├── data_loader.py        # Centralized data loading with validation
+│   │   ├── data_utils.py         # Data transformation utilities
+│   │   ├── filters.py            # Filter application functions
+│   │   ├── generate_sidebar.py   # Sidebar generation
+│   │   └── load_geojson.py       # GeoJSON loading
+│   ├── config/                    # Application configuration
+│   │   ├── env.py                # Environment variables
+│   │   ├── regions.py            # California region definitions
+│   │   └── theme.py              # Plotly theme configuration
+│   └── style.css                  # Custom CSS styling
+├── config/
+│   └── .streamlit/                # Streamlit configuration
+│       └── config.toml
+├── data/                          # Data files (required)
+│   ├── Dispensaries.csv
+│   ├── Dispensary_Density.csv
+│   ├── Tweet_Sentiment.csv
+│   └── California_County_Boundaries.geojson
+├── tests/                         # Test suite
+│   ├── conftest.py               # Pytest fixtures
+│   ├── test_data_loader.py       # Data loading tests
+│   └── test_config.py            # Configuration tests
+├── public/                        # Static assets
+├── CLAUDE.md                      # Development guide for AI assistants
+├── TODO.md                        # Task tracking
+├── DATA_SCHEMA.md                 # Data file specifications
+├── SECURITY.md                    # Security policies
+└── README.md                      # This file
 ```
 
 ## Development
 
-The project uses Poetry for dependency management and includes development tools:
-- Black: Code formatting
-- isort: Import sorting
-- flake8: Code linting
-- pytest: Testing
+### Testing
 
-Run tests:
+The project includes a comprehensive test suite with 20 passing tests:
+
 ```bash
+# Run all tests
 poetry run pytest
+
+# Run tests with verbose output
+poetry run pytest -v
+
+# Run specific test file
+poetry run pytest tests/test_data_loader.py
 ```
 
-Format code:
+### Code Quality
+
+The project uses Poetry for dependency management and includes development tools:
+
 ```bash
+# Format code with Black
 poetry run black .
+
+# Sort imports with isort
 poetry run isort .
+
+# Lint code with flake8
+poetry run flake8
+
+# Lint with pylint
+poetry run pylint app/
 ```
+
+### Development Tools
+- **Black**: Code formatting (line length: 88)
+- **isort**: Import sorting (Black-compatible profile)
+- **flake8**: Code linting
+- **pylint**: Advanced linting
+- **pytest**: Testing framework (20 tests, 100% passing)
+
+### Architecture Documentation
+
+- **[CLAUDE.md](CLAUDE.md)**: Comprehensive architectural guide for development
+- **[DATA_SCHEMA.md](DATA_SCHEMA.md)**: Complete data file specifications
+- **[SECURITY.md](SECURITY.md)**: Security policies and best practices
+- **[TODO.md](TODO.md)**: Task tracking and prioritization
+
+### Key Features
+
+- ✅ **Centralized Configuration**: Regions, themes, and settings in `app/config/`
+- ✅ **Data Validation**: Comprehensive validation on data load with user-friendly errors
+- ✅ **Performance**: Data caching with `@st.cache_data` for fast page loads
+- ✅ **Filtering**: Functional sidebar filters for time period, license type, and county
+- ✅ **Testing**: Full test suite with fixtures and 100% pass rate
+- ✅ **Type Safety**: Clear function signatures and docstrings
+- ✅ **Security**: Environment variable management and security guidelines
 
 ## Contributing
 
