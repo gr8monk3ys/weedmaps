@@ -1,12 +1,27 @@
-import os
-import sys
+"""
+Market Overview Page
+
+This page provides comprehensive market metrics for California's cannabis retail market,
+including:
+- Key performance indicators (total licenses, growth rates)
+- Year-over-year growth trends
+- Geographic distribution via choropleth map
+- License type breakdown
+- Market density categorization
+
+Data Sources:
+- Dispensaries.csv: Retailer license information
+- Dispensary_Density.csv: Population-adjusted metrics
+- Tweet_Sentiment.csv: Sentiment scores
+- California_County_Boundaries.geojson: Geographic boundaries
+"""
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 
 from utils.generate_sidebar import generate_sidebar
 from utils.data_loader import load_data
-from plots.choropleth import create_choropleth
+from utils.filters import apply_dispensary_filters, get_filter_summary, has_active_filters
+from utils.plot_helpers import create_choropleth_map, create_line_chart
 
 # Page config
 st.set_page_config(
@@ -15,12 +30,21 @@ st.set_page_config(
 
 # Load data
 data = load_data()
-dispensaries = data["dispensaries"]
+dispensaries_all = data["dispensaries"]
 density = data["density"]
 tweet_sentiment = data["tweet_sentiment"]
+ca_counties = data["ca_counties"]
 
 # Get sidebar filters
 sidebar_filters = generate_sidebar()
+
+# Apply filters to data
+dispensaries = apply_dispensary_filters(dispensaries_all, sidebar_filters)
+
+# Check for empty filtered data
+if len(dispensaries) == 0:
+    st.warning("⚠️ No data matches your current filter selections. Try adjusting the filters in the sidebar.")
+    st.stop()
 
 # Title and description
 st.title("📊 California Cannabis Market Overview")
@@ -30,6 +54,10 @@ st.markdown(
     market growth, and key industry metrics.
 """
 )
+
+# Show active filters
+if has_active_filters(sidebar_filters):
+    st.info(f"📊 {get_filter_summary(sidebar_filters)}")
 
 # Top-level metrics
 st.subheader("Market Snapshot")
@@ -57,32 +85,17 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     # Choropleth map
-    fig_map = px.choropleth(
+    fig_map = create_choropleth_map(
         density,
-        geojson="data/California_County_Boundaries.geojson",
+        geojson=ca_counties,
         locations="County",
-        featureidkey="properties.NAME",
         color="Dispensary_PerCapita",
-        color_continuous_scale="Greens",
-        scope="usa",
         title="Cannabis Retailer Distribution by County",
         hover_data=["Dispensary_PerCapita"],
         labels={
             "Dispensary_PerCapita": "Dispensaries per 100k residents",
             "County": "County",
-        },
-    )
-    fig_map.update_layout(
-        margin={"r": 0, "t": 30, "l": 0, "b": 0},
-        height=600,
-        geo=dict(
-            center=dict(lat=37.0902, lon=-120.7129),
-            projection_scale=5.5,
-            visible=False,
-            fitbounds="locations",
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+        }
     )
     st.plotly_chart(fig_map, use_container_width=True)
 
@@ -121,15 +134,14 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.write("#### Year-over-Year Growth")
-    fig_growth = px.line(
+    fig_growth = create_line_chart(
         yearly_data,
         x="Year",
         y="Growth_Rate",
         title="Market Growth Rate",
-        template="plotly_dark",
+        x_label="Year",
+        y_label="Growth Rate (%)"
     )
-    fig_growth.update_traces(line_color="#4CAF50")
-    fig_growth.update_layout(xaxis_title="Year", yaxis_title="Growth Rate (%)")
     st.plotly_chart(fig_growth, use_container_width=True)
 
 with col2:
@@ -154,42 +166,11 @@ with col2:
         hide_index=True,
     )
 
-# Data Filters
-st.subheader("Data Filters")
-
-# Create filter columns
-filter_col1, filter_col2 = st.columns(2)
-
-with filter_col1:
-    # Year filter
-    years = sorted(dispensaries["Year"].unique())
-    selected_years = st.select_slider(
-        "Select Year Range",
-        options=years,
-        value=(min(years), max(years)),
-        help="Filter data by year range",
-        label_visibility="visible",
-    )
-
-with filter_col2:
-    # License type filter
-    license_types = sorted(dispensaries["License Type"].unique())
-    selected_types = st.multiselect(
-        "License Types",
-        options=license_types,
-        default=license_types,
-        help="Filter by license type",
-        label_visibility="visible",
-    )
-
 # Market Size Analysis
 st.subheader("Market Size Analysis")
 
-# Filter data based on selections
-filtered_data = dispensaries[
-    (dispensaries["Year"].between(selected_years[0], selected_years[1]))
-    & (dispensaries["License Type"].isin(selected_types))
-]
+# Data is already filtered by sidebar filters
+filtered_data = dispensaries
 
 # Display filtered metrics
 col1, col2, col3 = st.columns(3)
@@ -296,36 +277,75 @@ with col2:
 # Key Insights
 st.subheader("Key Market Insights")
 
+# Calculate dynamic insights
+# 1. Market concentration - top 5 counties market share
+top_5_dispensaries = dispensaries.groupby("County")["Dispensary Name"].nunique().nlargest(5).sum()
+total_dispensaries_by_county = dispensaries.groupby("County")["Dispensary Name"].nunique().sum()
+top_5_share = (top_5_dispensaries / total_dispensaries_by_county * 100) if total_dispensaries_by_county > 0 else 0
+
+# 2. Growth trajectory - calculate recent growth rate
+if len(yearly_data) >= 2:
+    recent_growth = yearly_data["Growth_Rate"].iloc[-1]
+    avg_growth = yearly_data["Growth_Rate"].mean()
+    growth_trend = "accelerating" if recent_growth > avg_growth else "stable" if abs(recent_growth - avg_growth) < 5 else "slowing"
+else:
+    recent_growth = 0
+    growth_trend = "insufficient data"
+
+# 3. Market opportunities - high population, low density counties
+if len(density) > 0:
+    density_with_opportunity = density.copy()
+    density_with_opportunity["Opportunity_Score"] = (
+        density_with_opportunity["Population"] / (density_with_opportunity["Dispensary_PerCapita"] + 1)
+    )
+    top_opportunity = density_with_opportunity.nlargest(1, "Opportunity_Score").iloc[0]
+    opportunity_county = top_opportunity["County"]
+    opportunity_pop = top_opportunity["Population"]
+else:
+    opportunity_county = "N/A"
+    opportunity_pop = 0
+
 # Three column layout for insights
 insight_col1, insight_col2, insight_col3 = st.columns(3)
 
 with insight_col1:
     st.info(
-        """
+        f"""
         **Market Concentration**
-        
-        Urban areas show higher retailer density, reflecting 
-        population concentration and market demand.
+
+        Top 5 counties account for **{top_5_share:.1f}%** of all dispensaries,
+        showing {'high' if top_5_share > 60 else 'moderate'} market concentration
+        in urban areas.
         """
     )
 
 with insight_col2:
-    st.success(
-        """
-        **Growth Trajectory**
-        
-        The market shows steady growth, with new retailers 
-        entering both established and emerging regions.
-        """
-    )
+    if growth_trend != "insufficient data":
+        st.success(
+            f"""
+            **Growth Trajectory**
+
+            Market growth is **{growth_trend}** with recent rate of
+            **{recent_growth:+.1f}%**, compared to average of **{avg_growth:.1f}%**.
+            """
+        )
+    else:
+        st.success(
+            """
+            **Growth Trajectory**
+
+            Insufficient historical data for growth trend analysis.
+            More years needed for comprehensive trend assessment.
+            """
+        )
 
 with insight_col3:
     st.warning(
-        """
+        f"""
         **Market Opportunities**
-        
-        Several regions show potential for expansion, 
-        particularly in populous areas with lower density.
+
+        **{opportunity_county}** shows high expansion potential with
+        **{opportunity_pop:,.0f}** residents and relatively low market density.
         """
     )
 

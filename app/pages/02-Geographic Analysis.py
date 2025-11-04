@@ -1,14 +1,32 @@
-import os
-import sys
+"""
+Geographic Analysis Page
+
+This page provides detailed geographic analysis of cannabis market distribution across
+California counties, including:
+- Interactive choropleth maps showing retailer density
+- County-level density rankings
+- Regional market comparisons (Northern, Bay Area, Central, Southern)
+- Market opportunity analysis combining density and sentiment
+- Population-adjusted metrics
+
+Data Sources:
+- Dispensary_Density.csv: Population and density metrics
+- Tweet_Sentiment.csv: County-level sentiment
+- California_County_Boundaries.geojson: County boundaries for mapping
+
+Regional Definitions:
+Uses centralized region mappings from config.regions to group California's 58 counties
+into meaningful market regions for analysis.
+"""
 import pandas as pd
 import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-import json
 
 from utils.generate_sidebar import generate_sidebar
 from utils.data_loader import load_data
-from plots.bubble_chart import create_bubble_chart
+from utils.filters import apply_dispensary_filters, apply_density_filters, apply_sentiment_filters, get_filter_summary, has_active_filters
+from utils.data_utils import normalize_county_name
+from utils.plot_helpers import create_choropleth_map, create_bar_chart, create_histogram, create_scatter_plot
+from config.regions import SIMPLE_REGIONS, CALIFORNIA_REGIONS
 
 # Page config
 st.set_page_config(
@@ -17,12 +35,23 @@ st.set_page_config(
 
 # Load data
 data = load_data()
-dispensaries = data["dispensaries"]
-density = data["density"]
-tweet_sentiment = data["tweet_sentiment"]
+dispensaries_all = data["dispensaries"]
+density_all = data["density"]
+tweet_sentiment_all = data["tweet_sentiment"]
+counties = data["ca_counties"]
 
 # Get sidebar filters
 sidebar_filters = generate_sidebar()
+
+# Apply filters to data
+dispensaries = apply_dispensary_filters(dispensaries_all, sidebar_filters)
+density = apply_density_filters(density_all, sidebar_filters)
+tweet_sentiment = apply_sentiment_filters(tweet_sentiment_all, sidebar_filters)
+
+# Check for empty filtered data
+if len(density) == 0:
+    st.warning("⚠️ No data matches your current filter selections. Try adjusting the filters in the sidebar.")
+    st.stop()
 
 # Title and description
 st.title("🗺️ Geographic Market Analysis")
@@ -33,47 +62,25 @@ st.markdown(
 """
 )
 
-# Load California county boundaries
-with open("data/California_County_Boundaries.geojson") as f:
-    counties = json.load(f)
+# Show active filters
+if has_active_filters(sidebar_filters):
+    st.info(f"📊 {get_filter_summary(sidebar_filters)}")
 
-
-# Clean county names to match GeoJSON
-def clean_county_name(name):
-    return name.replace(" County", "").strip()
-
-
-density["County"] = density["County"].apply(clean_county_name)
+# Normalize county names using centralized utility
+density["County"] = density["County"].apply(normalize_county_name)
 
 # Geographic Overview
 st.subheader("Geographic Distribution Overview")
 
 # Create choropleth map
-fig_map = px.choropleth(
+fig_map = create_choropleth_map(
     density,
     geojson=counties,
     locations="County",
-    featureidkey="properties.NAME",
     color="Dispensary_PerCapita",
-    color_continuous_scale="Greens",
-    scope="usa",
     title="Cannabis Retailer Density by County",
     hover_data=["County"],
-    labels={"Dispensary_PerCapita": "Retailers per 100k Residents", "County": "County"},
-)
-
-# Update layout
-fig_map.update_layout(
-    margin={"r": 0, "t": 30, "l": 0, "b": 0},
-    height=600,
-    geo=dict(
-        center=dict(lat=37.0902, lon=-120.7129),
-        projection_scale=5.5,
-        visible=False,
-        fitbounds="locations",
-    ),
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
+    labels={"Dispensary_PerCapita": "Retailers per 100k Residents", "County": "County"}
 )
 
 # Display map
@@ -101,14 +108,12 @@ with col1:
 with col2:
     # Distribution histogram
     st.write("#### Distribution of Market Density")
-    fig_dist = px.histogram(
+    fig_dist = create_histogram(
         density,
         x="Dispensary_PerCapita",
         title="Distribution of Retailer Density",
-        template="plotly_dark",
-        labels={"Dispensary_PerCapita": "Retailers per 100k Residents"},
+        x_label="Retailers per 100k Residents"
     )
-    fig_dist.update_traces(marker_color="#4CAF50")
     st.plotly_chart(fig_dist, use_container_width=True)
 
 # Calculate county-level density
@@ -123,71 +128,25 @@ with col1:
     # County-level density
     st.write("#### Retailer Density by County")
     top_counties = density.nlargest(10, "Dispensary_PerCapita")
-    fig_density = px.bar(
+    fig_density = create_bar_chart(
         top_counties,
         x="County",
         y="Dispensary_PerCapita",
         title="Top 10 Counties by Retailer Density",
-        template="plotly_dark",
-        color_discrete_sequence=["#4CAF50"],
+        x_label="County",
+        y_label="Retailers per 100k Residents"
     )
-    fig_density.update_layout(
-        xaxis_title="County",
-        yaxis_title="Retailers per 100k Residents",
-        xaxis_tickangle=-45,
-    )
+    fig_density.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig_density, use_container_width=True)
 
 with col2:
     # Regional density
     st.write("#### Average Market Density by Region")
 
-    # Define regions
-    region_mapping = {
-        "Northern": [
-            "Humboldt",
-            "Mendocino",
-            "Trinity",
-            "Del Norte",
-            "Siskiyou",
-            "Shasta",
-            "Tehama",
-        ],
-        "Bay Area": [
-            "San Francisco",
-            "Alameda",
-            "Contra Costa",
-            "San Mateo",
-            "Santa Clara",
-            "Marin",
-            "Sonoma",
-            "Napa",
-            "Solano",
-        ],
-        "Central": [
-            "Sacramento",
-            "San Joaquin",
-            "Stanislaus",
-            "Merced",
-            "Fresno",
-            "Kings",
-            "Tulare",
-            "Kern",
-        ],
-        "Southern": [
-            "Los Angeles",
-            "Orange",
-            "San Diego",
-            "Riverside",
-            "San Bernardino",
-            "Ventura",
-            "Santa Barbara",
-        ],
-    }
-
+    # Use centralized region definitions from config
     # Calculate regional averages
     regional_density = []
-    for region, counties in region_mapping.items():
+    for region, counties in SIMPLE_REGIONS.items():
         counties = [c + " County" if not c.endswith(" County") else c for c in counties]
         avg_density = density[density["County"].isin(counties)][
             "Dispensary_PerCapita"
@@ -201,86 +160,24 @@ with col2:
 
     regional_df = pd.DataFrame(regional_density)
 
-    fig_regional = px.bar(
+    fig_regional = create_bar_chart(
         regional_df,
         x="Region",
         y="Average_Density",
         title="Average Retailer Density by Region",
-        template="plotly_dark",
-        color_discrete_sequence=["#81C784"],
-    )
-    fig_regional.update_layout(
-        xaxis_title="Region", yaxis_title="Average Retailers per 100k Residents"
+        x_label="Region",
+        y_label="Average Retailers per 100k Residents",
+        color_discrete_sequence=["#81C784"]
     )
     st.plotly_chart(fig_regional, use_container_width=True)
 
 # Regional Patterns
 st.subheader("Regional Market Patterns")
 
-# Define California regions
-regions = {
-    "Northern California": [
-        "Del Norte",
-        "Siskiyou",
-        "Modoc",
-        "Humboldt",
-        "Trinity",
-        "Shasta",
-        "Lassen",
-        "Tehama",
-        "Plumas",
-        "Mendocino",
-        "Glenn",
-        "Butte",
-        "Sierra",
-        "Lake",
-        "Colusa",
-        "Yuba",
-        "Nevada",
-        "Placer",
-        "Sutter",
-        "Yolo",
-        "El Dorado",
-        "Sacramento",
-        "Amador",
-        "Solano",
-        "Napa",
-        "Sonoma",
-        "Marin",
-    ],
-    "Central California": [
-        "San Joaquin",
-        "Calaveras",
-        "Alpine",
-        "Tuolumne",
-        "Stanislaus",
-        "Mono",
-        "Merced",
-        "Mariposa",
-        "Madera",
-        "Fresno",
-        "Kings",
-        "Tulare",
-        "Inyo",
-        "San Benito",
-        "Monterey",
-    ],
-    "Southern California": [
-        "San Luis Obispo",
-        "Santa Barbara",
-        "Ventura",
-        "Los Angeles",
-        "San Bernardino",
-        "Orange",
-        "Riverside",
-        "San Diego",
-        "Imperial",
-    ],
-}
-
+# Use centralized detailed region definitions from config
 # Calculate regional metrics
 region_metrics = []
-for region, counties in regions.items():
+for region, counties in CALIFORNIA_REGIONS.items():
     region_data = density[density["County"].isin(counties)]
     region_metrics.append(
         {
@@ -311,14 +208,13 @@ with col1:
 
 with col2:
     # Regional density comparison
-    fig_region = px.bar(
+    fig_region = create_bar_chart(
         region_df,
         x="Region",
         y="Average Density",
         title="Average Market Density by Region",
-        template="plotly_dark",
         color="Average Density",
-        color_continuous_scale="Greens",
+        color_continuous_scale="Greens"
     )
     st.plotly_chart(fig_region, use_container_width=True)
 
@@ -359,22 +255,17 @@ with col1:
 with col2:
     # Opportunity visualization
     st.write("#### Market Opportunity Matrix")
-    fig_opportunity = px.scatter(
+    fig_opportunity = create_scatter_plot(
         opportunity_counties,
         x="Dispensary_PerCapita",
         y="Sentiment_Score",
+        title="Market Opportunity Matrix",
+        x_label="Retailers per 100k Residents",
+        y_label="Sentiment Score",
         size="Population",
         color="Market_Score",
         hover_data=["County"],
-        title="Market Opportunity Matrix",
-        template="plotly_dark",
-        color_continuous_scale="Greens",
-    )
-
-    fig_opportunity.update_layout(
-        xaxis_title="Retailers per 100k Residents",
-        yaxis_title="Sentiment Score",
-        showlegend=True,
+        color_continuous_scale="Greens"
     )
 
     st.plotly_chart(fig_opportunity, use_container_width=True)
@@ -382,36 +273,78 @@ with col2:
 # Key Insights
 st.subheader("Key Geographic Insights")
 
+# Calculate dynamic insights
+# 1. Market distribution - urban vs rural density spread
+if len(density) > 0:
+    highest_density = density["Dispensary_PerCapita"].max()
+    lowest_density = density["Dispensary_PerCapita"].min()
+    density_ratio = highest_density / lowest_density if lowest_density > 0 else 0
+    highest_county = density.nlargest(1, "Dispensary_PerCapita").iloc[0]["County"]
+else:
+    density_ratio = 0
+    highest_county = "N/A"
+
+# 2. Growth opportunities - high population, low density
+if len(density) > 5:
+    # Calculate opportunity score: high population + low density
+    opportunity_analysis = density.copy()
+    opportunity_analysis["Opportunity_Score"] = (
+        opportunity_analysis["Population"] /
+        (opportunity_analysis["Dispensary_PerCapita"] + 0.1)
+    )
+    top_opportunity_county = opportunity_analysis.nlargest(1, "Opportunity_Score").iloc[0]
+    opportunity_name = top_opportunity_county["County"]
+    opportunity_pop = top_opportunity_county["Population"]
+    opportunity_density = top_opportunity_county["Dispensary_PerCapita"]
+else:
+    opportunity_name = "N/A"
+    opportunity_pop = 0
+    opportunity_density = 0
+
+# 3. Regional dynamics - variation across regions
+if len(regional_df) > 1 and "Average Density" in regional_df.columns:
+    regional_variation = regional_df["Average Density"].std()
+    highest_region = regional_df.nlargest(1, "Average Density").iloc[0]["Region"]
+    lowest_region = regional_df.nsmallest(1, "Average Density").iloc[0]["Region"]
+    variation_level = "high" if regional_variation > 5 else "moderate" if regional_variation > 2 else "low"
+else:
+    highest_region = "N/A"
+    lowest_region = "N/A"
+    variation_level = "unknown"
+
 # Three column layout for insights
 insight_col1, insight_col2, insight_col3 = st.columns(3)
 
 with insight_col1:
     st.info(
-        """
+        f"""
         **Market Distribution**
-        
-        Clear regional patterns in retailer density, with significant 
-        variations between urban and rural areas.
+
+        **{highest_county}** has the highest density, showing
+        **{density_ratio:.1f}x** more retailers per capita than the lowest,
+        indicating significant urban-rural divide.
         """
     )
 
 with insight_col2:
     st.success(
-        """
+        f"""
         **Growth Opportunities**
-        
-        Several populous counties show potential for market expansion,
-        particularly in regions with lower current density.
+
+        **{opportunity_name}** offers strong expansion potential with
+        **{opportunity_pop:,.0f}** residents but only **{opportunity_density:.1f}**
+        retailers per 100k.
         """
     )
 
 with insight_col3:
     st.warning(
-        """
+        f"""
         **Regional Dynamics**
-        
-        Each region shows distinct market characteristics,
-        suggesting need for tailored expansion strategies.
+
+        **{variation_level.capitalize()}** variation across regions,
+        with **{highest_region}** leading and **{lowest_region}** trailing,
+        requiring tailored strategies.
         """
     )
 

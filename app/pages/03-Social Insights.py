@@ -1,13 +1,41 @@
-import os
+"""
+Social Insights Page
+
+This page analyzes social media sentiment towards cannabis across California,
+providing insights into public perception and temporal trends:
+- Overall sentiment distribution and statistics
+- Temporal sentiment trends (sentiment over time)
+- Geographic sentiment distribution by county
+- Correlation between market density and sentiment
+- Sentiment volatility analysis
+
+Data Sources:
+- Tweet_Sentiment.csv: Social media posts with BERT sentiment scores
+- Dispensary_Density.csv: For correlation analysis with market metrics
+
+Sentiment Processing:
+Sentiment scores are pre-processed using convert_sentiment_score() which normalizes
+various formats (star ratings, numeric scores) to a -1.0 to 1.0 scale where:
+- 1.0 = Very positive
+- 0.0 = Neutral
+- -1.0 = Very negative
+"""
 import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from utils.generate_sidebar import generate_sidebar
 from utils.data_loader import load_data
+from utils.filters import apply_sentiment_filters, apply_density_filters, get_filter_summary, has_active_filters
+from utils.data_utils import add_county_suffix
+from utils.plot_helpers import create_bar_chart, create_scatter_plot
+from utils.error_messages import (
+    show_no_data_error,
+    show_temporal_analysis_error,
+    show_correlation_warning
+)
 
 # Page config
 st.set_page_config(
@@ -16,20 +44,34 @@ st.set_page_config(
 
 # Load data
 data = load_data()
-tweet_sentiment = data["tweet_sentiment"]
-density = data["density"]
+tweet_sentiment_all = data["tweet_sentiment"]
+density_all = data["density"]
 
 # Get sidebar filters
 sidebar_filters = generate_sidebar()
+
+# Apply filters to data
+tweet_sentiment = apply_sentiment_filters(tweet_sentiment_all, sidebar_filters)
+density = apply_density_filters(density_all, sidebar_filters)
+
+# Check for empty filtered data
+if len(tweet_sentiment) == 0:
+    filter_summary = get_filter_summary(sidebar_filters) if has_active_filters(sidebar_filters) else None
+    show_no_data_error(filter_info=filter_summary, page_name="Social Insights")
+    st.stop()
 
 # Title and description
 st.title("💭 Social Media Insights")
 st.markdown(
     """
-    Analysis of social media sentiment towards cannabis across California, 
+    Analysis of social media sentiment towards cannabis across California,
     including temporal trends and geographic distribution.
     """
 )
+
+# Show active filters
+if has_active_filters(sidebar_filters):
+    st.info(f"📊 {get_filter_summary(sidebar_filters)}")
 
 # Overall Sentiment Metrics
 st.subheader("Sentiment Overview")
@@ -134,59 +176,87 @@ try:
     # Display plot
     st.plotly_chart(fig, use_container_width=True)
 
-    # Show trend statistics
-    st.write("#### Trend Statistics")
-    col1, col2, col3 = st.columns(3)
+    # Show trend statistics (only if there are at least 2 months of data)
+    if len(monthly_sentiment) >= 2:
+        st.write("#### Trend Statistics")
+        col1, col2, col3 = st.columns(3)
 
-    with col1:
-        recent_sentiment = monthly_sentiment.iloc[-1]["Sentiment"]
-        sentiment_change = recent_sentiment - monthly_sentiment.iloc[-2]["Sentiment"]
-        st.metric(
-            "Recent Sentiment",
-            f"{recent_sentiment:.2f}",
-            f"{sentiment_change:+.2f}",
-            help="Most recent month's average sentiment",
-        )
+        with col1:
+            recent_sentiment = monthly_sentiment.iloc[-1]["Sentiment"]
+            sentiment_change = recent_sentiment - monthly_sentiment.iloc[-2]["Sentiment"]
+            st.metric(
+                "Recent Sentiment",
+                f"{recent_sentiment:.2f}",
+                f"{sentiment_change:+.2f}",
+                help="Most recent month's average sentiment",
+            )
 
-    with col2:
-        recent_volume = monthly_sentiment.iloc[-1]["Volume"]
-        volume_change = recent_volume - monthly_sentiment.iloc[-2]["Volume"]
-        volume_change_pct = (volume_change / monthly_sentiment.iloc[-2]["Volume"]) * 100
-        st.metric(
-            "Recent Volume",
-            f"{int(recent_volume):,}",
-            f"{volume_change_pct:+.1f}%",
-            help="Most recent month's tweet volume",
-        )
+        with col2:
+            recent_volume = monthly_sentiment.iloc[-1]["Volume"]
+            volume_change = recent_volume - monthly_sentiment.iloc[-2]["Volume"]
+            # Handle division by zero for volume change percentage
+            prev_volume = monthly_sentiment.iloc[-2]["Volume"]
+            if prev_volume > 0:
+                volume_change_pct = (volume_change / prev_volume) * 100
+                delta_str = f"{volume_change_pct:+.1f}%"
+            else:
+                delta_str = "N/A"
+            st.metric(
+                "Recent Volume",
+                f"{int(recent_volume):,}",
+                delta_str,
+                help="Most recent month's tweet volume",
+            )
 
-    with col3:
-        recent_positive = monthly_sentiment.iloc[-1]["Positive_Ratio"]
-        positive_change = recent_positive - monthly_sentiment.iloc[-2]["Positive_Ratio"]
-        st.metric(
-            "Positive Ratio",
-            f"{recent_positive:.1f}%",
-            f"{positive_change:+.1f}%",
-            help="Percentage of positive tweets in the most recent month",
-        )
+        with col3:
+            recent_positive = monthly_sentiment.iloc[-1]["Positive_Ratio"]
+            positive_change = recent_positive - monthly_sentiment.iloc[-2]["Positive_Ratio"]
+            st.metric(
+                "Positive Ratio",
+                f"{recent_positive:.1f}%",
+                f"{positive_change:+.1f}%",
+                help="Percentage of positive tweets in the most recent month",
+            )
+    elif len(monthly_sentiment) == 1:
+        # Show current metrics without comparison if only 1 month of data
+        st.write("#### Current Month Statistics")
+        st.info("💡 Trend comparison requires at least 2 months of data. Showing current month only.")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            recent_sentiment = monthly_sentiment.iloc[-1]["Sentiment"]
+            st.metric(
+                "Recent Sentiment",
+                f"{recent_sentiment:.2f}",
+                help="Current month's average sentiment",
+            )
+
+        with col2:
+            recent_volume = monthly_sentiment.iloc[-1]["Volume"]
+            st.metric(
+                "Recent Volume",
+                f"{int(recent_volume):,}",
+                help="Current month's tweet volume",
+            )
+
+        with col3:
+            recent_positive = monthly_sentiment.iloc[-1]["Positive_Ratio"]
+            st.metric(
+                "Positive Ratio",
+                f"{recent_positive:.1f}%",
+                help="Percentage of positive tweets in current month",
+            )
+    else:
+        st.warning("⚠️ Insufficient data for trend statistics. Need at least 1 month of data.")
 
 except Exception as e:
-    st.error(
-        """
-        Unable to generate temporal analysis. This might be due to:
-        - Missing or invalid date information
-        - Insufficient data points for trend analysis
-        Please check the data format and try again.
-    """
-    )
-    st.exception(e)
+    show_temporal_analysis_error(e)
 
 # Geographic Sentiment Analysis
 st.subheader("Geographic Sentiment Distribution")
 
-# Clean county names in tweet_sentiment
-tweet_sentiment["County"] = tweet_sentiment["County"].apply(
-    lambda x: x + " County" if not x.endswith(" County") else x
-)
+# Standardize county names using centralized utility
+tweet_sentiment["County"] = tweet_sentiment["County"].apply(add_county_suffix)
 
 # Calculate county-level sentiment
 county_sentiment = (
@@ -207,20 +277,19 @@ county_sentiment = county_sentiment.round(2)
 top_counties = county_sentiment.nlargest(10, "Tweet Count")
 
 # Create bar chart
-fig_counties = px.bar(
+fig_counties = create_bar_chart(
     top_counties,
     x="County",
     y="Average Sentiment",
-    color="Positive Ratio",
     title="Top Counties by Tweet Volume",
-    template="plotly_dark",
+    x_label="County",
+    y_label="Average Sentiment",
+    color="Positive Ratio",
     color_continuous_scale="Greens",
-    hover_data=["Tweet Count"],
+    hover_data=["Tweet Count"]
 )
 
-fig_counties.update_layout(
-    xaxis_title="County", yaxis_title="Average Sentiment", xaxis_tickangle=-45
-)
+fig_counties.update_layout(xaxis_tickangle=-45)
 
 st.plotly_chart(fig_counties, use_container_width=True)
 
@@ -282,10 +351,8 @@ st.dataframe(
 # Correlation Analysis
 st.subheader("Market Correlation Analysis")
 
-# Clean county names in density data if needed
-density["County"] = density["County"].apply(
-    lambda x: x + " County" if not x.endswith(" County") else x
-)
+# Standardize county names using centralized utility
+density["County"] = density["County"].apply(add_county_suffix)
 
 # Merge sentiment with density data
 market_correlation = pd.merge(
@@ -295,67 +362,152 @@ market_correlation = pd.merge(
     how="inner",
 )
 
-# Create scatter plot
-fig_correlation = px.scatter(
-    market_correlation,
-    x="Dispensary_PerCapita",
-    y="Average Sentiment",
-    size="Population",
-    color="Tweet Count",
-    hover_data=["County", "Positive Ratio"],
-    title="Market Density vs. Social Sentiment",
-    template="plotly_dark",
-    color_continuous_scale="Greens",
-    trendline="ols",
-    trendline_color_override="#4CAF50",
-)
+# Check if merge resulted in sufficient data
+if len(market_correlation) >= 2:
+    # Create scatter plot
+    fig_correlation = create_scatter_plot(
+        market_correlation,
+        x="Dispensary_PerCapita",
+        y="Average Sentiment",
+        title="Market Density vs. Social Sentiment",
+        x_label="Retailers per 100k Residents",
+        y_label="Average Sentiment Score",
+        size="Population",
+        color="Tweet Count",
+        hover_data=["County", "Positive Ratio"],
+        color_continuous_scale="Greens",
+        trendline="ols",
+        trendline_color_override="#4CAF50"
+    )
 
-# Update layout
-fig_correlation.update_layout(
-    xaxis_title="Retailers per 100k Residents",
-    yaxis_title="Average Sentiment Score",
-    showlegend=False,
-)
+    fig_correlation.update_layout(showlegend=False)
 
-st.plotly_chart(fig_correlation, use_container_width=True)
+    st.plotly_chart(fig_correlation, use_container_width=True)
 
-# Add correlation statistics
-correlation = market_correlation["Dispensary_PerCapita"].corr(
-    market_correlation["Average Sentiment"]
-)
-st.info(
-    f"""
-    **Market-Sentiment Correlation**
-    - Correlation Coefficient: {correlation:.2f}
-    - This suggests a {'strong' if abs(correlation) > 0.5 else 'moderate' if abs(correlation) > 0.3 else 'weak'} 
-      {'positive' if correlation > 0 else 'negative'} relationship between market density and public sentiment.
-"""
-)
+    # Add correlation statistics
+    correlation = market_correlation["Dispensary_PerCapita"].corr(
+        market_correlation["Average Sentiment"]
+    )
+
+    # Check if correlation is valid (not NaN)
+    if pd.notna(correlation):
+        st.info(
+            f"""
+            **Market-Sentiment Correlation**
+            - Correlation Coefficient: {correlation:.2f}
+            - This suggests a {'strong' if abs(correlation) > 0.5 else 'moderate' if abs(correlation) > 0.3 else 'weak'}
+              {'positive' if correlation > 0 else 'negative'} relationship between market density and public sentiment.
+        """
+        )
+    else:
+        st.warning("⚠️ Unable to calculate correlation. The data may have insufficient variation.")
+elif len(market_correlation) == 1:
+    show_correlation_warning(1)
+    st.dataframe(market_correlation[["County", "Dispensary_PerCapita", "Average Sentiment"]], use_container_width=True)
+else:
+    show_correlation_warning(0)
 
 # Key Insights
 st.subheader("Key Insights")
 
+# Calculate dynamic insights
+# 1. Temporal patterns
+try:
+    if len(monthly_sentiment) >= 3:
+        # Calculate trend direction
+        recent_3_months = monthly_sentiment.tail(3)["Sentiment"]
+        sentiment_trend = "increasing" if recent_3_months.iloc[-1] > recent_3_months.iloc[0] else "decreasing"
+
+        # Calculate volume correlation with sentiment
+        volume_sentiment_corr = monthly_sentiment["Volume"].corr(monthly_sentiment["Sentiment"])
+        correlation_strength = "strong" if abs(volume_sentiment_corr) > 0.5 else "moderate" if abs(volume_sentiment_corr) > 0.3 else "weak"
+        correlation_direction = "positive" if volume_sentiment_corr > 0 else "negative"
+
+        # Find peak sentiment month
+        peak_month = monthly_sentiment.nlargest(1, "Sentiment").iloc[0]
+        peak_date = peak_month["Date"].strftime("%B %Y")
+    else:
+        sentiment_trend = "insufficient data"
+        correlation_strength = "unknown"
+        correlation_direction = "unknown"
+        peak_date = "N/A"
+except:
+    sentiment_trend = "unknown"
+    correlation_strength = "unknown"
+    correlation_direction = "unknown"
+    peak_date = "N/A"
+
+# 2. Geographic insights
+if len(county_sentiment) >= 3:
+    # Compare urban (high tweet count) vs rural (low tweet count) sentiment
+    median_tweet_count = county_sentiment["Tweet Count"].median()
+    urban_counties = county_sentiment[county_sentiment["Tweet Count"] > median_tweet_count]
+    rural_counties = county_sentiment[county_sentiment["Tweet Count"] <= median_tweet_count]
+
+    if len(urban_counties) > 0 and len(rural_counties) > 0:
+        urban_sentiment = urban_counties["Average Sentiment"].mean()
+        rural_sentiment = rural_counties["Average Sentiment"].mean()
+        sentiment_difference = urban_sentiment - rural_sentiment
+        urban_more_positive = urban_sentiment > rural_sentiment
+    else:
+        sentiment_difference = 0
+        urban_more_positive = True
+
+    # Market-sentiment correlation
+    if len(market_correlation) >= 2 and pd.notna(correlation):
+        correlation_interpretation = (
+            "positive" if correlation > 0.1 else
+            "negative" if correlation < -0.1 else
+            "neutral"
+        )
+    else:
+        correlation_interpretation = "unclear"
+else:
+    sentiment_difference = 0
+    urban_more_positive = True
+    correlation_interpretation = "unclear"
+
 col1, col2 = st.columns(2)
 
 with col1:
-    st.info(
-        """
-        **Temporal Patterns**
-        - Monthly sentiment trends show [dynamic pattern]
-        - Tweet volume correlates with [market events]
-        - Seasonal variations in public perception
-        """
-    )
+    if sentiment_trend != "unknown" and sentiment_trend != "insufficient data":
+        st.info(
+            f"""
+            **Temporal Patterns**
+            - Sentiment is **{sentiment_trend}** over recent months
+            - **{correlation_strength.capitalize()} {correlation_direction}** correlation between volume and sentiment
+            - Peak sentiment occurred in **{peak_date}**
+            """
+        )
+    else:
+        st.info(
+            """
+            **Temporal Patterns**
+            - Insufficient historical data for trend analysis
+            - More data points needed for pattern detection
+            - Continue monitoring for emerging trends
+            """
+        )
 
 with col2:
-    st.success(
-        """
-        **Geographic Insights**
-        - Urban areas show [different sentiment]
-        - Market density correlates with [sentiment pattern]
-        - Regional variations in acceptance levels
-        """
-    )
+    if correlation_interpretation != "unclear":
+        st.success(
+            f"""
+            **Geographic Insights**
+            - {'Urban' if urban_more_positive else 'Rural'} areas show **{abs(sentiment_difference):.2f}** points higher sentiment
+            - Market density shows **{correlation_interpretation}** correlation with sentiment
+            - Regional acceptance levels vary significantly across counties
+            """
+        )
+    else:
+        st.success(
+            """
+            **Geographic Insights**
+            - Limited geographic data for comprehensive analysis
+            - County-level patterns emerging as data grows
+            - Regional variations require more data points
+            """
+        )
 
 # Footer
 st.markdown("---")
