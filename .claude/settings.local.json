@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh --version:*)",
+      "Bash(claude mcp add:*)",
+      "Bash(poetry run pytest:*)",
+      "Bash(poetry run black:*)",
+      "Bash(python -c:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(poetry list:*)",
+      "Bash(poetry run isort:*)",
+      "Bash(poetry add:*)",
+      "Bash(poetry run flake8:*)",
+      "Bash(poetry run pylint:*)",
+      "Bash(cd:*)",
+      "Bash(poetry show:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
