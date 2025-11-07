@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "sentry": {
+      "type": "http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "description": "Sentry error monitoring and debugging for production dashboard"
+    }
+  }
+}
