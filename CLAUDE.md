@@ -47,8 +47,17 @@ poetry run pytest
   - `01-Market Overview.py` - YoY growth, license breakdown
   - `02-Geographic Analysis.py` - Choropleth maps, regional analysis
   - `03-Social Insights.py` - Sentiment analysis, temporal trends
+  - `04-Data Quality.py` - Data coverage and validation metrics
 - **Plots**: `app/plots/` - Reusable Plotly visualization functions
 - **Utils**: `app/utils/` - Shared utilities and data loading
+  - `data_loader.py` - Centralized data loading with validation
+  - `data_utils.py` - County name normalization utilities
+  - `data_validation.py` - Comprehensive data quality validation
+  - `filters.py` - Filter application logic
+  - `error_messages.py` - User-friendly error displays
+  - `generate_sidebar.py` - Sidebar generation
+  - `plot_helpers.py` - Chart creation utilities
+  - `load_geojson.py` - GeoJSON loading and validation
 - **Config**: `config/.streamlit/` - Streamlit theming and configuration
 
 ### Key Architectural Patterns
@@ -73,18 +82,74 @@ from utils.generate_sidebar import generate_sidebar
 sidebar_filters = generate_sidebar()  # Provides consistent filtering UI
 ```
 
+#### Filter Application (Consistent Logic)
+Apply filters using centralized utilities from `utils/filters.py`:
+```python
+from utils.filters import apply_dispensary_filters, apply_sentiment_filters
+
+# Apply filters to data
+dispensaries = apply_dispensary_filters(data['dispensaries'], sidebar_filters)
+sentiment = apply_sentiment_filters(data['tweet_sentiment'], sidebar_filters)
+```
+
+Filter functions available:
+- `apply_dispensary_filters()` - Year, license type, county filters
+- `apply_sentiment_filters()` - Year, county filters
+- `apply_density_filters()` - Year, county filters
+- `get_filter_summary()` - Get human-readable filter description
+- `has_active_filters()` - Check if any filters are applied
+
 #### Visualization Functions (Modular)
-Plot functions in `app/plots/` are self-contained and reusable:
-- Accept data and configuration parameters
-- Return Plotly figure objects
-- Handle their own GeoJSON loading when needed
-- Example: `create_choropleth(data, value_column, location_column)`
+Chart creation utilities in `app/utils/plot_helpers.py`:
+
+```python
+from utils.plot_helpers import (
+    create_choropleth_map,
+    create_bar_chart,
+    create_line_chart,
+    create_histogram,
+    create_scatter_plot,
+    get_california_map_layout
+)
+
+# Example: Create a bar chart
+fig = create_bar_chart(
+    data=df,
+    x="County",
+    y="Count",
+    title="Dispensaries by County",
+    x_label="County",
+    y_label="Number of Dispensaries",
+    color=GREEN_PALETTE["primary"]
+)
+```
+
+Available functions:
+- `create_choropleth_map()` - County-level choropleth with CA boundaries
+- `create_bar_chart()` - Categorical comparisons
+- `create_line_chart()` - Temporal trends
+- `create_histogram()` - Distribution visualization
+- `create_scatter_plot()` - Correlation analysis
+- `get_california_map_layout()` - Standard CA map layout configuration
 
 #### Data Processing
 - **Sentiment Conversion**: The `data_loader.py` contains `convert_sentiment_score()` that normalizes various sentiment formats to a consistent -1 to 1 scale
 - **Data Caching**: `load_data()` uses `@st.cache_data` decorator for performance - data loads once per session
 - **Data Validation**: Comprehensive validation checks for file existence, required columns, and data integrity
-- **County Name Cleaning**: Many pages clean county names to match GeoJSON using `.replace(" County", "").strip()`
+- **County Name Normalization**: Use `data_utils.py` for consistent county name handling:
+  ```python
+  from utils.data_utils import normalize_county_name, add_county_suffix, normalize_dataframe_counties
+
+  # Remove " County" suffix and trim whitespace
+  clean_name = normalize_county_name("Los Angeles County")  # Returns "Los Angeles"
+
+  # Add " County" suffix
+  full_name = add_county_suffix("Los Angeles")  # Returns "Los Angeles County"
+
+  # Normalize entire DataFrame column
+  df = normalize_dataframe_counties(df, column_name="County")
+  ```
+  **Why this matters**: GeoJSON features use "Los Angeles" while some data files use "Los Angeles County". Always normalize before joins/merges.
 - **Regional Mapping**: Centralized in `app/config/regions.py` - use `CALIFORNIA_REGIONS` or `SIMPLE_REGIONS`
 
 ### Data Dependencies
@@ -176,6 +241,41 @@ ca_counties = data["ca_counties"]  # Use this for all choropleth maps
 
 Do NOT manually load GeoJSON files or use hardcoded paths.
 
+### Error Handling Pattern
+Use standardized error displays from `utils/error_messages.py`:
+
+```python
+from utils.error_messages import (
+    show_no_data_error,
+    show_file_missing_error,
+    show_column_missing_error,
+    show_insufficient_data_warning,
+    show_loading_error
+)
+
+# Example: Show friendly error when filters return no data
+if filtered_data.empty:
+    show_no_data_error(
+        filter_info=sidebar_filters,
+        page_name="Market Overview"
+    )
+    st.stop()
+```
+
+Available error functions:
+- `show_no_data_error()` - When filters exclude all data
+- `show_file_missing_error()` - When required data files don't exist
+- `show_column_missing_error()` - When CSV columns are missing
+- `show_insufficient_data_warning()` - When data is too sparse for analysis
+- `show_loading_error()` - Generic data loading errors
+- `show_correlation_warning()` - When correlation analysis has too few points
+- `show_temporal_analysis_error()` - When time-series analysis fails
+
+Each error includes:
+- Clear problem explanation
+- Why it happened (expandable)
+- Step-by-step recovery instructions (expandable)
+
 ## Configuration
 
 - **Poetry**: `pyproject.toml` - Dependency management, Black/isort settings
@@ -184,18 +284,37 @@ Do NOT manually load GeoJSON files or use hardcoded paths.
 - **App Config**: `app/config/` - Centralized application configuration
   - `regions.py`: California county-to-region mappings
   - `theme.py`: Plotly visualization theme and color palette
+  - `env.py`: Environment variable management and configuration
+    - `Config.get_api_key()` - Get OpenAI API key
+    - `Config.validate()` - Validate environment setup
+    - `Config.is_production()` - Check environment mode
 
 ## Testing Strategy
 
-Basic test structure is in place in `tests/` directory:
-- Run tests with `poetry run pytest`
-- Fixtures available in `tests/conftest.py` for sample data
-- Current tests cover:
-  - `test_data_loader.py`: Sentiment score conversion and data directory functions
-  - `test_config.py`: Region and theme configuration validation
+Comprehensive test suite in `tests/` directory with 7 test modules:
+- Run all tests: `poetry run pytest`
+- Run specific file: `poetry run pytest tests/test_filters.py`
+- Run with coverage: `poetry run pytest --cov=app tests/`
 
-When adding new tests:
-- Follow the established code formatting (Black, isort)
-- Use the fixtures from `conftest.py` for sample data
+**Test Files**:
+- `test_data_loader.py` - Data loading, caching, sentiment conversion
+- `test_config.py` - Region and theme configuration validation
+- `test_data_utils.py` - County normalization, name validation
+- `test_data_validation.py` - Data quality checks, ValidationResult class
+- `test_filters.py` - Filter application logic
+- `test_load_geojson.py` - GeoJSON loading and structure validation
+- `test_plots/` - Visualization function tests
+
+**Fixtures** (`tests/conftest.py`):
+- `sample_dispensaries_data` - 6 rows of dispensary data
+- `sample_density_data` - 6 rows of density data
+- `sample_sentiment_data` - 6 rows with sentiment scores
+- `sample_geojson` - Minimal valid GeoJSON structure
+- `mock_data_dir` - Temporary data directory with all files
+
+**Testing Guidelines**:
+- Follow established code formatting (Black, isort)
+- Use fixtures from `conftest.py` for sample data
 - Test data transformations, not Streamlit UI components
 - Mock Streamlit functions (`st.error`, `st.stop`) when testing data_loader
+- Add new fixtures to `conftest.py` for reusable test data
